@@ -4,7 +4,7 @@
 <head>
   <!-- <script src="https://cdn.jsdelivr.net/npm/vanilla-picker@2.12.3/dist/vanilla-picker.min.js"></script> -->
   <!-- <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/vanilla-picker@2.12.3/dist/vanilla-picker.csp.min.css"> -->
-
+  <link rel="stylesheet" href="style.css">
   <script type="module">
     import { f } from "./newLib2.js";
 
@@ -20,7 +20,6 @@
     let startTime;
 
     function initGL(canvas) {
-      sum(1, 2);
       lib2.f();
       gl = canvas.getContext("webgl2");
       gl.viewportWidth = canvas.width;
@@ -47,23 +46,30 @@
         precision highp float;
 
         uniform float u_time;
+        uniform float zoom;
+        uniform float X;
+        uniform float Y;
+        uniform float it;
 
         layout(location = 0) out vec4 OutColor;
 
-        float I( vec2 z )
+        float I( vec2 z, int iter )
         {
-          vec2 z0 = z, c = vec2(0.16 + 2.0 * sin(u_time * 0.4), 0.38 + 0.03 * sin(u_time * 0.4 + float(1)));
-          float n = float(0);
+          vec2 z0 = z, c = vec2(0.16 + 0.3 * sin(u_time * 0.1 + 0.1), 0.38 + 0.03 * sin(u_time * 0.1 + float(1)));
+          int n = 0;
         
-          while (n < 255.0 && length(z) < 2.0)
-            z = vec2(z.x * z.x - z.y * z.y, float(2) * z.x * z.y) + c, n += 1.0;
-          return n;
+          while (n < iter && length(z) < 2.0)
+            z = vec2(z.x * z.x - z.y * z.y, 2.0 * z.x * z.y) + c, n++;
+          return float(n);
         }
 
         void main() {
-            vec2 sc = vec2(gl_FragCoord.xy / 300.0);
-            sc.x -= 1.0;
-            OutColor = vec4(I(sc) / 100.0, I(sc) / 255.0, I(sc) / 245.0, 1.0);
+            vec2 sc = vec2(gl_FragCoord.xy);
+            float rx = 2.0 * (X + 500.0 / (2.0 * zoom) * (2.0 * sc.x / 500.0 - 1.0)) / 500.0 - 1.0;
+            float ry = 2.0 * (Y + 500.0 / (2.0 * zoom) * (2.0 * sc.y / 500.0 - 1.0)) / 500.0 - 1.0;
+
+            float c = I(vec2(rx, ry), int(it));
+            OutColor = vec4(c / (it + 100.0), c / it, c / (it + 50.0), 1.0);
 
           
         }`;
@@ -91,7 +97,12 @@
       return shader;
     }
 
-    let u_time_location;
+    let it_loc, u_time_location, zoom_loc, x_loc, y_loc, IsPause = true, PauseTime = 0, OldTime = 0;
+    let zoom = 1;
+    let x = 250, y = 250, oldx = -1, oldy = -1, flag = true, it = 255.0;
+    let mousein = false;
+    let mousedown = false;
+    let timeFromStart = 0;
 
     function initShaders() {
       function loadShaderText(uri) {
@@ -133,6 +144,10 @@
       gl.useProgram(program);
 
       u_time_location = gl.getUniformLocation(program, "u_time");
+      zoom_loc = gl.getUniformLocation(program, "zoom");
+      x_loc = gl.getUniformLocation(program, "X");
+      y_loc = gl.getUniformLocation(program, "Y");
+      it_loc = gl.getUniformLocation(program, "it");
     }
 
     let vertexBuffer;
@@ -148,6 +163,7 @@
     }
 
     function drawScene() {
+
       gl.clearColor(0, 1, 0, 1);
       gl.viewport(0, 0, gl.viewportWidth, gl.viewportHeight);
       gl.clear(gl.COLOR_BUFFER_BIT);
@@ -155,10 +171,22 @@
       gl.enableVertexAttribArray(0);
       gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
 
-      timeFromStart = new Date().getMilliseconds() - startTime;
-      gl.uniform1f(u_time_location, timeFromStart / 1000.0);
+      let t = new Date().getTime();
 
+      if (!IsPause)
+        timeFromStart = t - startTime - PauseTime;
+      else
+        PauseTime += t - OldTime;
+
+      gl.uniform1f(u_time_location, timeFromStart / 100.0);
+      gl.uniform1f(zoom_loc, zoom);
+      gl.uniform1f(x_loc, x);
+      gl.uniform1f(y_loc, y);
+      gl.uniform1f(it_loc, it);
       gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+      OldTime = t;
+
       window.requestAnimationFrame(drawScene);
     }
 
@@ -171,14 +199,44 @@
       let canvas = document.getElementById("webgl-canvas");
 
       canvas.onmousemove = (ev) => {
-        console.log(`(${ev.x}, ${ev.y})`);
+        if (oldx == -1 || oldy == -1) {
+          oldx = ev.x;
+          oldy = ev.y;
+        }
+        if (mousedown) {
+          /* Drag cursor to move camera */
+          x -= (ev.x - oldx) / zoom;
+          y += (ev.y - oldy) / zoom;
+        }
+        oldx = ev.x;
+        oldy = ev.y;
+      };
+      canvas.onwheel = (ev) => {
+        zoom *= 1 - ev.deltaY / 100.0;
+        x -= (oldx / zoom - 250.0 / zoom) * ev.deltaY / 2000;
+        y += (oldy / zoom - 250.0 / zoom) * ev.deltaY / 2000;
+      };
+      canvas.onmouseover = (ev) => {
+        mousein = true;
+      };
+      canvas.onmouseout = (ev) => {
+        mousein = false;
+      };
+      canvas.onmousedown = (ev) => {
+        mousedown = true;
+      };
+      canvas.onmouseup = (ev) => {
+        mousedown = false;
       };
 
       initGL(canvas);
       initShaders();
       initBuffer();
 
-      startTime = new Date().getMilliseconds();
+      document.getElementById("slider").onchange = function () {
+        it = this.value;
+      }
+      startTime = new Date().getTime();
       drawScene();
     }
   </script>
@@ -186,7 +244,23 @@
 
 <body onload="onStart();">
   <canvas id="webgl-canvas" style="border: none" width="500" height="500"></canvas>
-  <div id="parent">Click me</div>
+  <button onclick="PauseFunc()">Pause</button>
+
+  <script>
+    document.getElementById('Button').onclick = PauseFunc();
+    function PauseFunc() {
+      if (IsPause == true)
+        IsPause = false;
+      else
+        IsPause = true;
+    }
+  </script>
 </body>
+
+<head>
+
+  <p>iterations</p>
+  <input name="iterations" id="slider" type="range" min=1 max=500 value=255 step=1 />
+</head>
 
 </html>
